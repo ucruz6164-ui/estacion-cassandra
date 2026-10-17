@@ -1,17 +1,30 @@
 // Estacion UTHH · conexion con Cassandra y escritura de lecturas.
 // Lo usan el servidor web y el simulador.
 const cassandra = require("cassandra-driver");        // controlador oficial de Cassandra para Node.js
+const fs = require("node:fs");
+const path = require("node:path");
 const { LocalDate } = cassandra.types;                // tipo para las columnas "date"
+// Node 22/24 lee app/.env sin instalar otra dependencia.
+const archivoEnv = path.join(__dirname, ".env");
+if (fs.existsSync(archivoEnv)) process.loadEnvFile(archivoEnv);
 
 const KS = "estacion";                                // keyspace (el equivalente a la "base de datos")
 const ZONA = "America/Mexico_City";                   // zona horaria para decidir el "dia" de cada lectura
 
 // Cliente: se conecta al nodo de Cassandra que corre en Docker, puerto 9042
 function crearCliente() {
-  return new cassandra.Client({
-    contactPoints: ["127.0.0.1"],                     // direccion del nodo
-    localDataCenter: "datacenter1",                   // centro de datos (el nombre por defecto)
-  });
+  const usuario = process.env.CASSANDRA_USER || "";
+  const clave = process.env.CASSANDRA_PASSWORD || "";
+  if (Boolean(usuario) !== Boolean(clave)) {
+    throw new Error("Configura juntos CASSANDRA_USER y CASSANDRA_PASSWORD en app/.env");
+  }
+  const opciones = {
+    contactPoints: (process.env.CASSANDRA_HOSTS || "127.0.0.1").split(",").map(x => x.trim()),
+    localDataCenter: process.env.CASSANDRA_DATACENTER || "datacenter1",
+  };
+  // Reto 3: la clave solo esta en el servidor; nunca se entrega al navegador.
+  if (usuario) opciones.authProvider = new cassandra.auth.PlainTextAuthProvider(usuario, clave);
+  return new cassandra.Client(opciones);
 }
 
 // Dia local en formato AAAA-MM-DD (en Mexico, no en UTC)
@@ -26,7 +39,7 @@ function mostrar(cql, params) {
     const v = params[i++];
     if (typeof v === "number") return String(v);
     if (v instanceof Date) return "'" + v.toISOString() + "'";
-    return "'" + String(v) + "'";
+    return "'" + String(v).replace(/'/g, "''") + "'";
   });
 }
 
@@ -63,6 +76,10 @@ async function guardarLectura(cliente, sensor, lectura, bitacora, historico = fa
   if (alerta) lote.push({
     query: `INSERT INTO ${KS}.alertas_por_dia (dia, hora, sensor, temperatura, mensaje) VALUES (?, ?, ?, ?, ?)`,
     params: [fecha, hora, sensor.id, temperatura, sensor.nombre + " supera " + sensor.temp_max + " °C"],
+  }, {
+    // Reto 2: una particion por sensor y dia, acotada en tamano.
+    query: `INSERT INTO ${KS}.alertas_por_sensor_dia (sensor, dia, hora, temperatura, mensaje) VALUES (?, ?, ?, ?, ?)`,
+    params: [sensor.id, fecha, hora, temperatura, sensor.nombre + " supera " + sensor.temp_max + " °C"],
   });
   if (bitacora) bitacora.push("BEGIN BATCH", ...lote.map(l => "  " + mostrar(l.query, l.params) + ";"), "APPLY BATCH;");
   await cliente.batch(lote, { prepare: true });       // BATCH: se aplican juntas

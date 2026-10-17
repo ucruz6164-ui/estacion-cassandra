@@ -5,11 +5,12 @@ const http = require("http");                         // servidor web incluido e
 const fs = require("fs");                             // para leer los archivos de web/
 const path = require("path");
 const { KS, LocalDate, crearCliente, diaLocal, ejecutar, guardarLectura, leerSensores } = require("./bd");
+const { consultarResumenes, consultarAlertasSensor } = require("./retos");
 
 const PUERTO = 3000;
 const WEB = path.join(__dirname, "web");
-const TABLAS = ["sensores", "lecturas_por_sensor_dia", "ultima_lectura", "alertas_por_dia", "conteo_por_dia"];
-const cliente = crearCliente();                       // UNA conexion para todo el servidor
+const TABLAS = ["sensores", "lecturas_por_sensor_dia", "ultima_lectura", "alertas_por_dia", "conteo_por_dia", "resumen_por_dia", "alertas_por_sensor_dia"];
+function crearServidor(cliente = crearCliente()) {   // UNA conexion para todo el servidor
 
 // ------------------------------------------------------------------ rutas de la API
 // Cada ruta recibe la URL ya separada y devuelve un objeto que se enviara como JSON.
@@ -70,7 +71,7 @@ async function registrar(datos) {
   if (!s) throw new Error("No existe el sensor " + datos.sensor);
   const t = Number(datos.temperatura), h = Number(datos.humedad);
   if (!(t >= -20 && t <= 60)) throw new Error("La temperatura debe estar entre -20 y 60 °C");
-  if (!(h >= 0 && h <= 100)) throw new Error("La humedad debe estar entre 0 y 100 %");
+  if (!Number.isInteger(h) || !(h >= 0 && h <= 100)) throw new Error("La humedad debe ser un entero entre 0 y 100 %");
   const r = await guardarLectura(cliente, s, { hora: new Date(), temperatura: t, humedad: h }, cql);
   return { sensor: s.id, dia: r.dia, alerta: r.alerta, cql };
 }
@@ -78,7 +79,7 @@ async function registrar(datos) {
 // ------------------------------------------------------------------ servidor
 const TIPOS = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8" };
 
-http.createServer(async (req, res) => {
+return http.createServer(async (req, res) => {
   const url = new URL(req.url, "http://localhost");
   const ruta = url.pathname;
   // 1) Archivos de la carpeta web/ (index.html, estilos.css, app.js...)
@@ -97,6 +98,8 @@ http.createServer(async (req, res) => {
     let m;
     if (req.method === "GET" && ruta === "/api/estado") respuesta = await estado();
     else if (req.method === "GET" && ruta === "/api/sensores") respuesta = await sensores();
+    else if (req.method === "GET" && ruta === "/api/resumenes") respuesta = await consultarResumenes(cliente, url.searchParams);
+    else if (req.method === "GET" && (m = ruta.match(/^\/api\/sensores\/([\w-]+)\/alertas$/))) respuesta = await consultarAlertasSensor(cliente, m[1], url.searchParams);
     else if (req.method === "GET" && (m = ruta.match(/^\/api\/sensores\/([\w-]+)\/lecturas$/))) respuesta = await lecturas(m[1], url.searchParams);
     else if (req.method === "GET" && ruta === "/api/alertas") respuesta = await alertas(url.searchParams);
     else if (req.method === "POST" && ruta === "/api/lecturas") {
@@ -112,4 +115,10 @@ http.createServer(async (req, res) => {
   }
   res.writeHead(codigo, { "Content-Type": "application/json; charset=utf-8" });
   res.end(JSON.stringify(respuesta));
-}).listen(PUERTO, () => console.log("Estacion UTHH en el puerto " + PUERTO + " (pestana Puertos -> 3000)"));
+});
+}
+
+if (require.main === module) {
+  crearServidor().listen(PUERTO, () => console.log("Estacion UTHH en el puerto " + PUERTO + " (pestana Puertos -> 3000)"));
+}
+module.exports = { crearServidor };
