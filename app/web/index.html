@@ -26,16 +26,59 @@
       <p class="nota">El puerto 3000 debe estar en Public.</p>
     </section>
   </div>
+  <section class="tarjeta">
+    <h2>Resumen diario</h2>
+    <p class="nota">Minima, maxima y promedio calculados hasta la fecha de actualizacion. Vuelve a ejecutar el script de resumenes cuando agregues lecturas.</p>
+    <form class="campos" id="filtro-resumen">
+      <label>Dia <input id="dia-resumen" type="date" required></label>
+      <button type="submit">Consultar resumen</button>
+    </form>
+    <div id="aviso-resumen"></div>
+    <div class="tabla"><table>
+      <thead><tr><th>Sensor</th><th>Minima</th><th>Maxima</th><th>Promedio</th><th>Lecturas</th><th>Calculado</th></tr></thead>
+      <tbody id="resumenes"></tbody>
+    </table></div>
+    <div id="cql-resumen"></div>
+  </section>
   <div id="cql"></div>
 </main>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script src="app.js"></script>
 <script>
 menu("index.html");
+const diaResumen = document.getElementById("dia-resumen");
+
+async function cargarResumenes() {
+  try {
+    const r = await api("/resumenes?dia=" + diaResumen.value);
+    const tabla = document.getElementById("resumenes");
+    tabla.textContent = "";
+    for (const resumen of r.resumenes) {
+      const fila = el("tr");
+      fila.append(el("td", null, resumen.nombre),
+        el("td", null, resumen.calculado ? num(resumen.temp_min) + " °C" : "—"),
+        el("td", null, resumen.calculado ? num(resumen.temp_max) + " °C" : "—"),
+        el("td", null, resumen.calculado ? num(resumen.temp_promedio) + " °C" : "—"),
+        el("td", null, resumen.calculado ? resumen.total : "—"),
+        el("td", null, resumen.calculado ? new Date(resumen.actualizado).toLocaleString("es-MX") : "Sin calcular"));
+      tabla.append(fila);
+    }
+    aviso(document.getElementById("aviso-resumen"), r.resumenes.some(x => x.calculado)
+      ? "" : "No hay resumenes para este dia. Genera los resumenes o elige otro dia con datos.");
+    verCql(document.getElementById("cql-resumen"), r.cql);
+  } catch (error) {
+    aviso(document.getElementById("aviso-resumen"), error.message, "error");
+  }
+}
+document.getElementById("filtro-resumen").addEventListener("submit", evento => {
+  evento.preventDefault();
+  cargarResumenes();
+});
 
 async function cargar() {
   try {
     const r = await api("/sensores");                 // GET /api/sensores
+    if (!diaResumen.value) { diaResumen.value = r.hoy; cargarResumenes(); }
     const a = await api("/alertas?dia=" + r.hoy);     // GET /api/alertas?dia=AAAA-MM-DD
     // Una tarjeta por sensor
     const cont = document.getElementById("sensores");

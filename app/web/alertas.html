@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alertas por sensor · Estacion UTHH</title>
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+<main>
+  <h1>Alertas por sensor</h1>
+  <p class="nota">Consulta las alertas mas recientes de un sensor en varios dias, incluido el dia final.</p>
+  <form class="tarjeta campos" id="filtro">
+    <label>Sensor <select id="sensor" required></select></label>
+    <label>Hasta el dia <input id="hasta" type="date" required></label>
+    <label>Dias <input id="dias" type="number" min="1" max="31" value="7" required></label>
+    <label>Maximo de alertas <input id="limite" type="number" min="1" max="500" value="100" required></label>
+    <button type="submit">Consultar alertas</button>
+  </form>
+  <div id="aviso"></div>
+  <section class="tarjeta">
+    <h2 id="resultado">Resultados</h2>
+    <div class="tabla"><table>
+      <thead><tr><th>Dia</th><th>Hora local</th><th>Temperatura</th><th>Mensaje</th></tr></thead>
+      <tbody id="tabla"></tbody>
+    </table></div>
+  </section>
+  <div id="cql"></div>
+</main>
+<script src="app.js"></script>
+<script>
+menu("alertas.html");
+const sensor = document.getElementById("sensor");
+const hasta = document.getElementById("hasta");
+const dias = document.getElementById("dias");
+const limite = document.getElementById("limite");
+async function cargar() {
+  if (!sensor.value) return;
+  try {
+    const consulta = new URLSearchParams({ hasta: hasta.value, dias: dias.value, limite: limite.value });
+    const r = await api("/sensores/" + encodeURIComponent(sensor.value) + "/alertas?" + consulta);
+    const tabla = document.getElementById("tabla");
+    tabla.textContent = "";
+    for (const alerta of r.alertas) {
+      const fila = el("tr");
+      fila.append(el("td", null, alerta.dia), el("td", null, horaLocal(alerta.hora)),
+        el("td", null, num(alerta.temperatura) + " °C"), el("td", null, alerta.mensaje));
+      tabla.append(fila);
+    }
+    document.getElementById("resultado").textContent = r.alertas.length + " alertas · " + r.desde + " a " + r.hasta;
+    aviso(document.getElementById("aviso"), r.alertas.length ? "" : "Sin alertas en este periodo.");
+    verCql(document.getElementById("cql"), r.cql);
+  } catch (error) { aviso(document.getElementById("aviso"), error.message, "error"); }
+}
+document.getElementById("filtro").addEventListener("submit", evento => { evento.preventDefault(); cargar(); });
+api("/sensores").then(r => {
+  hasta.value = r.hoy;
+  for (const dato of r.sensores) {
+    const opcion = el("option", null, dato.nombre + " · " + dato.id);
+    opcion.value = dato.id;
+    sensor.append(opcion);
+  }
+  cargar();
+}).catch(error => aviso(document.getElementById("aviso"), error.message, "error"));
+</script>
+</body>
+</html>
